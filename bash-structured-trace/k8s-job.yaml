@@ -1,0 +1,56 @@
+#NOTE: ConfigMap, converted from ./resouces/bashrc
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: bashenv
+data:
+  bashrc: "function post_trace () {\n  #NOTE: $? refers to the last result before
+    trap EXIT\n  if [[ $? = 0 ]]; then\n    EXEC_ST=\"STATUS_CODE_OK\"\n  else\n    EXEC_ST=\"STATUS_CODE_ERROR\"\n
+    \ fi\n\n  cat <<- EOS\n\t{ \"resourceSpans\": [{\n\t\"scopeSpans\": [{\n\t\t\"spans\":
+    [{\n\t\t\t\"name\": \"$SERVICE_NAME\", \"traceId\": \"$TRACE_ID\", \"spanId\":
+    \"$SPAN_ID\",\n\t\t\t\"startTimeUnixNano\": $START_TIME, \"endTimeUnixNano\":
+    $(date +%s%N),\n\t\t\t\"status\": { \"code\": \"$EXEC_ST\" }\n\t\t}]\n\t}],\n\t\"resource\":
+    {\n\t\t\"attributes\": [\n\t\t\t{ \"key\": \"service.name\", \"value\": { \"stringValue\":
+    \"$SERVICE_NAME\" } },\n\t\t]\n\t}\n\t}]}\nEOS\n}\n\nexport START_TIME=$(date
+    +%s%N)\nif [[ ${#TRACE_ID} < 32 ]]; then\n  export TRACE_ID=$(printf \"%032x\"
+    \"0x$TRACE_ID\")\nfi\nexport SPAN_ID=\"000000000000$(printf '%04x' $RANDOM)\"\n\n#NOTE:
+    call function on shutdown\ntrap \"post_trace\" EXIT\n"
+
+---
+#NOTE: Job, putting trace to STDOUT after completion
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: bash-structured-trace
+spec:
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: echo
+        image: debian:12
+
+        env:
+        #NOTE: https://www.gnu.org/software/bash/manual/html_node/Bash-Startup-Files.html
+        - name: BASH_ENV
+          value: /root/.bashrc
+        - name: SERVICE_NAME
+          value: bash-structured-trace
+        - name: TRACE_ID
+          value: "00000000000000000000000000000000"
+
+        command: ["bash"]
+        args:
+        - -c
+        - |
+          echo 'INFO: job init... then completed.'
+
+        volumeMounts:
+        - name: bashenv
+          mountPath: /root/.bashrc
+          subPath: bashrc
+
+      volumes:
+      - name: bashenv
+        configMap:
+          name: bashenv

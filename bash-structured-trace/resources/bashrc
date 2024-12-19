@@ -1,0 +1,34 @@
+function post_trace () {
+  #NOTE: $? refers to the last result before trap EXIT
+  if [[ $? = 0 ]]; then
+    EXEC_ST="STATUS_CODE_OK"
+  else
+    EXEC_ST="STATUS_CODE_ERROR"
+  fi
+
+  cat <<- EOS
+	{ "resourceSpans": [{
+	"scopeSpans": [{
+		"spans": [{
+			"name": "$SERVICE_NAME", "traceId": "$TRACE_ID", "spanId": "$SPAN_ID",
+			"startTimeUnixNano": $START_TIME, "endTimeUnixNano": $(date +%s%N),
+			"status": { "code": "$EXEC_ST" }
+		}]
+	}],
+	"resource": {
+		"attributes": [
+			{ "key": "service.name", "value": { "stringValue": "$SERVICE_NAME" } },
+		]
+	}
+	}]}
+EOS
+}
+
+export START_TIME=$(date +%s%N)
+if [[ ${#TRACE_ID} < 32 ]]; then
+  export TRACE_ID=$(printf "%032x" "0x$TRACE_ID")
+fi
+export SPAN_ID="000000000000$(printf '%04x' $RANDOM)"
+
+#NOTE: call function on shutdown
+trap "post_trace" EXIT
